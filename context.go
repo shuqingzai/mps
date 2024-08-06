@@ -10,11 +10,11 @@ import (
 )
 
 var (
-	// http request is nil
+	// RequestNilErr http request is nil
 	RequestNilErr = errors.New("request is nil")
-	// http request method not support
+	// MethodNotSupportErr http request method not support
 	MethodNotSupportErr = errors.New("request method not support")
-	// http request is websocket
+	// RequestWebsocketUpgradeErr http request is websocket
 	RequestWebsocketUpgradeErr = errors.New("websocket upgrade")
 )
 
@@ -32,6 +32,10 @@ type Context struct {
 
 	// Transport is used for global HTTP requests, and it will be reused.
 	Transport *http.Transport
+
+	wrappedRoundTrip http.RoundTripper
+
+	httpRoundTripWrappers []HttpRoundTripWrapper
 
 	// In some cases it is not always necessary to remove the proxy headers.
 	// For example, cascade proxy
@@ -58,17 +62,18 @@ func NewContext() *Context {
 		Context: context.Background(),
 		// Cannot reuse one Transport because multiple proxy can collide with each other
 		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
 				Timeout:   15 * time.Second,
 				KeepAlive: 30 * time.Second,
 				DualStack: true,
 			}).DialContext,
+			// ForceAttemptHTTP2:     true,
 			MaxIdleConns:          100,
 			IdleConnTimeout:       90 * time.Second,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
 			TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
-			Proxy:                 http.ProxyFromEnvironment,
 		},
 		Request:                nil,
 		Response:               nil,
@@ -156,6 +161,14 @@ func (ctx *Context) Next(req *http.Request) (*http.Response, error) {
 // Like the RoundTripper interface, the error types returned
 // by RoundTrip are unspecified.
 func (ctx *Context) RoundTrip(req *http.Request) (*http.Response, error) {
+	if ctx.wrappedRoundTrip != nil {
+		return ctx.wrappedRoundTrip.RoundTrip(req)
+	}
+	return ctx.roundTrip(req)
+}
+
+// roundTrip implements the http.RoundTripper interface.
+func (ctx *Context) roundTrip(req *http.Request) (*http.Response, error) {
 	// These Headers must be reset when a client Request is issued to reuse a Request
 	if !ctx.KeepClientHeaders {
 		ResetClientHeaders(req)
@@ -175,17 +188,24 @@ func (ctx *Context) RoundTrip(req *http.Request) (*http.Response, error) {
 
 // WithRequest get the Context of the request
 func (ctx *Context) WithRequest(req *http.Request) *Context {
-	return &Context{
-		Context:                ctx.Context,
-		Request:                req,
-		Response:               nil,
+	ct := &Context{
+		Context:   ctx.Context,
+		Request:   req,
+		Response:  nil,
+		Transport: ctx.Transport,
+		// wrappedRoundTrip:       nil,
+		// httpRoundTripWrappers:  ctx.httpRoundTripWrappers,
 		KeepProxyHeaders:       ctx.KeepProxyHeaders,
 		KeepClientHeaders:      ctx.KeepClientHeaders,
 		KeepDestinationHeaders: ctx.KeepDestinationHeaders,
-		Transport:              ctx.Transport,
 		mi:                     -1,
 		middlewares:            ctx.middlewares,
 	}
+
+	// clone http.RoundTripper middlewares
+	ct.WrapRoundTrip(ctx.httpRoundTripWrappers...)
+
+	return ct
 }
 
 // ResetClientHeaders These Headers must be reset when a client Request is issued to reuse a Request
@@ -197,7 +217,7 @@ func ResetClientHeaders(r *http.Request) {
 	r.Header.Del("Accept-Encoding")
 }
 
-// Hop-by-hop headers. These are removed when sent to the backend.
+// RemoveProxyHeaders Hop-by-hop headers. These are removed when sent to the backend.
 // As of RFC 7230, hop-by-hop headers are required to appear in the
 // Connection header field. These are the headers defined by the
 // obsoleted RFC 2616 (section 13.5.1) and are used for backward

@@ -2,6 +2,7 @@ package mps
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -47,7 +48,7 @@ func (tunnel *TunnelHandler) ServeHTTP(rw http.ResponseWriter, req *http.Request
 	// execution middleware
 	ctx := tunnel.Ctx.WithRequest(req)
 	resp, err := ctx.Next(req)
-	if err != nil && err != MethodNotSupportErr {
+	if err != nil && !errors.Is(err, MethodNotSupportErr) {
 		if resp != nil {
 			copyHeaders(rw.Header(), resp.Header, tunnel.Ctx.KeepDestinationHeaders)
 			rw.WriteHeader(resp.StatusCode)
@@ -57,11 +58,26 @@ func (tunnel *TunnelHandler) ServeHTTP(rw http.ResponseWriter, req *http.Request
 		}
 		return
 	}
+	// maybe panic, the response is nil
+	if resp == nil {
+		http.Error(rw, "response is nil", http.StatusBadGateway)
+		return
+	}
+
+	// TODO:: statusCode error
+	// if resp != nil && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
+	// 	copyHeaders(rw.Header(), resp.Header, tunnel.Ctx.KeepDestinationHeaders)
+	// 	rw.WriteHeader(resp.StatusCode)
+	// 	buf := tunnel.buffer().Get()
+	// 	_, err = io.CopyBuffer(rw, resp.Body, buf)
+	// 	tunnel.buffer().Put(buf)
+	// 	return
+	// }
 
 	// hijacker connection
 	proxyClient, err := hijacker(rw)
 	if err != nil {
-		http.Error(rw, err.Error(), 502)
+		http.Error(rw, err.Error(), http.StatusBadGateway)
 		return
 	}
 

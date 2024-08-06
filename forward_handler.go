@@ -38,7 +38,12 @@ func (forward *ForwardHandler) ServeHTTP(rw http.ResponseWriter, req *http.Reque
 	ctx := forward.Ctx.WithRequest(req)
 	resp, err := ctx.Next(req)
 	if err != nil {
-		http.Error(rw, err.Error(), 502)
+		http.Error(rw, err.Error(), http.StatusBadGateway)
+		return
+	}
+	// maybe panic, the response is nil
+	if resp == nil {
+		http.Error(rw, "response is nil", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
@@ -54,7 +59,7 @@ func (forward *ForwardHandler) ServeHTTP(rw http.ResponseWriter, req *http.Reque
 	bufferSize, err = io.CopyBuffer(buffer, resp.Body, buf)
 	forward.buffer().Put(buf)
 	if err != nil {
-		http.Error(rw, err.Error(), 502)
+		http.Error(rw, err.Error(), http.StatusBadGateway)
 		return
 	}
 

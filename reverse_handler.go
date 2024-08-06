@@ -30,9 +30,15 @@ func (reverse *ReverseHandler) ServeHTTP(rw http.ResponseWriter, req *http.Reque
 	ctx := reverse.Ctx.WithRequest(req)
 	resp, err := ctx.Next(req)
 	if err != nil {
-		http.Error(rw, err.Error(), 502)
+		http.Error(rw, err.Error(), http.StatusBadGateway)
 		return
 	}
+	// maybe panic, the response is nil
+	if resp == nil {
+		http.Error(rw, "response is nil", http.StatusBadGateway)
+		return
+	}
+
 	defer resp.Body.Close()
 
 	var (
@@ -46,7 +52,7 @@ func (reverse *ReverseHandler) ServeHTTP(rw http.ResponseWriter, req *http.Reque
 	bufferSize, err = io.CopyBuffer(buffer, resp.Body, buf)
 	reverse.buffer().Put(buf)
 	if err != nil {
-		http.Error(rw, err.Error(), 502)
+		http.Error(rw, err.Error(), http.StatusBadGateway)
 		return
 	}
 
