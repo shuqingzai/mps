@@ -59,10 +59,10 @@ func (tunnel *TunnelHandler) ServeHTTP(rw http.ResponseWriter, req *http.Request
 		return
 	}
 	// maybe panic, the response is nil
-	if resp == nil {
-		http.Error(rw, "response is nil", http.StatusBadGateway)
-		return
-	}
+	// if resp == nil {
+	// 	http.Error(rw, "response is nil", http.StatusBadGateway)
+	// 	return
+	// }
 
 	// TODO:: statusCode error
 	// if resp != nil && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
